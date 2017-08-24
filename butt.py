@@ -80,9 +80,9 @@ class Communicator(object):
         :return:
         """
         df = pd.read_sql_table('Applications', connectable)
-        if affirmation('Wollen Sie die gesamte Liste an Bewerbungen sehen:'):
-            with pd.option_context('display.max_rows', None, 'display.max_columns', 7):
-                print(df.to_string())
+        # if affirmation('Wollen Sie die gesamte Liste an Bewerbungen sehen:'):
+        with pd.option_context('display.max_rows', None, 'display.max_columns', 7):
+            print(df.to_string())
 
     @classmethod
     def modify_entry(cls, connectable, session, column_name):
@@ -93,38 +93,41 @@ class Communicator(object):
         print('-------------------------------------------------------------------------')
         id_str = ""
         while not re.findall(r'^[0-9]+$', id_str):
-            id_str = get_string('Gib die ID der zu ändernden Bewerbung ein: ')
+            id_str = get_string('Gib die ID der zu ändernden Bewerbung ein: ', 'number')
         id_int = int(id_str)
         row = session.query(Application).filter_by(id=id_int).first()
         if column_name == 'company':
+
             row.set_company(
-                get_string('Gib den veränderten Namen der Firma ein: ')
+                get_string('Gib den veränderten Namen der Firma ein: ', 'company')
             )
         elif column_name == 'job':
             row.set_job(
-                get_string('Gib die veränderte Jobbezeichnung ein: ')
+                get_string('Gib die veränderte Jobbezeichnung ein: ', 'job')
             )
         elif column_name == 'state':
             row.set_state(
                 int(
-                    get_string(create_state_prompt())
+                    get_string(create_state_prompt(), 'state')
                 )
             )
         elif column_name == 'last_changed':
             row.set_date(
                 datetime.datetime.strptime(
-                    get_string('Gib das Datum in der Form >> dd.mm.yyyy <<'), '%d.%m.%Y'
+                    get_string('Gib das Datum in der Form >> dd.mm.yyyy <<', 'last_changed'), '%d.%m.%Y'
                 )
             )
         elif column_name == 'active':
             row.set_active(
                 bool(
-                    get_string('Ist diese Bewerbung noch aktiv? "0" = Nein, "1" = Ja:')
+                    int(
+                        get_string('Ist diese Bewerbung noch aktiv? "0" = Nein, "1" = Ja:', 'active')
+                    )
                 )
             )
         elif column_name == 'contact':
             row.set_contact(
-                get_string('Gib die veränderten Kontaktdaten an')
+                get_string('Gib die veränderten Kontaktdaten an', 'contact')
             )
 
         session.commit()
@@ -160,7 +163,7 @@ class Communicator(object):
         session.commit()
 
 
-def get_string(prompt):
+def get_string(prompt, input_type):
     """
     Retrieves string through User-Interaction
     :param prompt is a prompt for the user-input
@@ -168,13 +171,13 @@ def get_string(prompt):
     """
     user_input = input(prompt)
 
-    if user_input != "":
-        if affirmation(user_input):
+    if user_input != '':
+        if affirmation(user_input, input_type):
             return user_input
         else:
-            return get_string(prompt)
+            return get_string(prompt, input_type)
     else:
-        return get_string(prompt)
+        return get_string(prompt, input_type)
 
 
 def create_state_prompt():
@@ -188,21 +191,31 @@ def create_state_prompt():
     return prompt
 
 
-def affirmation(user_input):
+def affirmation(user_input, input_type):
     """
-    Get an affirmation for a input
+    Get an affirmation for a input, raises a ValueError if the input_type is unknown
     :param user_input from a previous prompt
     :return: returns boolean-value of the affirmation
     """
-    if re.findall(r'^[0-6]$', user_input):
-        affirm = input('Ist >%s< korrekt? [j/n]' % Status(int(user_input)).name)
-    elif re.findall(r'^[7-9]$', user_input):
-        print('Sie haben eine nicht vorhandene Option gewählt, bitte wöhlen Sie erneut!')
-        return False
-    else:
-        affirm = input('Ist >%s< korrekt? [j/n]' % user_input)
 
-    if affirm.upper() == 'J':
+    if input_type.lower() == 'status':
+        if re.findall(r'^[0-6]$', user_input):
+            affirm = input('Ist >%s< korrekt? [j/n]' % Status(int(user_input)).name)
+        elif re.findall(r'^[7-9]$', user_input):
+            print('Sie haben eine nicht vorhandene Option gewählt, bitte wöhlen Sie erneut!')
+            return affirmation(user_input, input_type)
+    elif input_type.lower() == 'active':
+        if re.findall(r'^[0-1]', user_input):
+            affirm = input('Ist >%s< korrekt? [j/n]' % bool(int(user_input)))
+        else:
+            print('Sie haben eine nicht vorhandene Option gewählt, bitte wöhlen Sie erneut!')
+            return affirmation(user_input, input_type)
+    elif input_type.lower() in ('company', 'job', 'last_changed', 'contact', 'number'):
+        affirm = input('Ist >%s< korrekt? [j/n]' % user_input)
+    else:
+        raise ValueError('A non-existing input-type has been selected')
+
+    if affirm.lower() == 'j':
         return True
     else:
         return False
@@ -220,7 +233,10 @@ class AlreadyExistsException(BaseException):
         self.errors = errors
 
 
-class Application(declarative_base()):
+# splalchemy base
+Base = declarative_base()
+
+class Application(Base):
     """
     This class represents a job-application and is used to store corresponding data in a SQLite3 database for
     documentation of my jobsearch.
@@ -332,8 +348,6 @@ def connect_or_create_db(name, echo=False):
     :return session: returns a session object to interact with the database
     """
 
-    # splalchemy base
-    Base = declarative_base()
 
     engine = create_engine('sqlite:///%s' % name, echo=echo)
 
@@ -349,7 +363,7 @@ def connect_or_create_db(name, echo=False):
 @click.option('--display', is_flag=True, help='Will print the whole application-table to the screen')
 @click.option('--add', is_flag=True, help='Will add a new row to the database')
 @click.option('--modify', default='company', help='The argument >>TEXT<< specifies the field to modify')
-@click.option('--out', default='out.csv', help='Option for printing the table to a .csv-file.\n'
+@click.option('--out', default='', help='Option for printing the table to a .csv-file.\n'
                                                'The argument specifies the filnename. The default filename ist '
                                                '>>out.csv<<')
 def main(display, add, modify, out):
